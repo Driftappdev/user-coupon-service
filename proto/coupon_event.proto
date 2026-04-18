@@ -1,0 +1,39 @@
+syntax = "proto3";
+
+package coupon;
+
+option go_package = "dift_user_insentive/user-coupon-service/proto/pb/coupon;coupon";
+
+enum CouponEventType {
+  CREATED = 0;
+  UPDATED = 1;
+  REDEEMED = 2;
+  DEACTIVATED = 3;
+}
+
+message CouponEvent {
+  CouponEventType type = 1;
+
+  string user_id = 2;
+  string coupon_code = 3;
+
+  string status = 4;
+
+  // discount
+  string discount_type = 5;
+  double discount_value = 6;
+
+  double min_order = 7;
+  double max_discount = 8;
+
+  // targeting
+  string product_type = 9;
+
+  // usage
+  int32 max_usage = 10;
+  int32 usage_count = 11;
+
+  // validity
+  string valid_from = 12; // RFC3339
+  string valid_to = 13;   // RFC3339
+}
