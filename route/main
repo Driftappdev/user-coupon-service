@@ -1,0 +1,200 @@
+package main
+
+import (
+	"context"
+	"log"
+	"os"
+	"os/signal"
+	"syscall"
+
+	"dift_user_insentive/user-coupon-service/config"
+
+	grpcadapter "dift_user_insentive/user-coupon-service/internal/adapter/grpc"
+	httpadapter "dift_user_insentive/user-coupon-service/internal/adapter/http"
+	ordercompletedconsumer "dift_user_insentive/user-coupon-service/internal/adapter/order_completed_consumer"
+	orderfailedconsumer "dift_user_insentive/user-coupon-service/internal/adapter/order_failed_consumer"
+	repositoryadapter "dift_user_insentive/user-coupon-service/internal/adapter/repository"
+	natsadapter "dift_user_insentive/user-coupon-service/internal/adapter/user_coupon_comsumer"
+	worker "dift_user_insentive/user-coupon-service/internal/adapter/worker"
+
+	"dift_user_insentive/user-coupon-service/internal/service"
+	handlerlogic "dift_user_insentive/user-coupon-service/internal/service/handler/order"
+	route "dift_user_insentive/user-coupon-service/route"
+
+	grpcinfra "dift_user_insentive/user-coupon-service/internal/integration/grpc_server"
+	httpinfra "dift_user_insentive/user-coupon-service/internal/integration/http"
+	natsinfra "dift_user_insentive/user-coupon-service/internal/integration/nats"
+	dbinfra "dift_user_insentive/user-coupon-service/internal/integration/postgres"
+
+	pb "dift_user_insentive/user-coupon-service/proto/pb/usercoupon"
+
+	"github.com/gin-gonic/gin"
+	"google.golang.org/grpc"
+)
+
+func main() {
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	cfg := config.LoadConfig()
+
+	//--------------------------------
+	// Database
+	//--------------------------------
+
+	db, err := dbinfra.New(dbinfra.Config{
+		DSN: cfg.Database.DSN,
+	})
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	//--------------------------------
+	// Repository
+	//--------------------------------
+
+	repo := repositoryadapter.New(db)
+	idemRepo := repositoryadapter.NewIdempotencyRepository(db)
+	usageRepo := repositoryadapter.NewUsageRepository(db)
+
+	//--------------------------------
+	// Services
+	//--------------------------------
+
+	commandSvc := service.NewCouponCommandService(
+		repo,
+		idemRepo,
+		usageRepo,
+	)
+
+	querySvc := service.NewCouponQueryService(repo)
+
+	//--------------------------------
+	// Event Handlers
+	//--------------------------------
+
+	couponEventHandler := handlerlogic.NewCouponEventHandler(commandSvc)
+
+	orderCompletedHandler := handlerlogic.NewOrderCompletedHandler(commandSvc)
+	orderFailedHandler := handlerlogic.NewOrderFailedHandler(commandSvc)
+
+	//--------------------------------
+	// HTTP Server
+	//--------------------------------
+
+	queryHandler := httpadapter.New(querySvc)
+
+	router := gin.New()
+
+	route.RegisterRoutes(
+		router,
+		queryHandler,
+	)
+
+	httpServer := httpinfra.New(
+		cfg.HTTP.Port,
+		router,
+	)
+
+	go httpServer.Start()
+
+	//--------------------------------
+	// gRPC Server
+	//--------------------------------
+
+	grpcHandler := grpcadapter.New(querySvc)
+
+	grpcServer := grpcinfra.NewGRPCServer(cfg.GRPC.Address)
+
+	grpcServer.RegisterService(func(s *grpc.Server) {
+		pb.RegisterUserCouponServiceServer(s, grpcHandler)
+	})
+
+	go grpcServer.Start()
+
+	//--------------------------------
+	// NATS
+	//--------------------------------
+
+	natsClient, err := natsinfra.NewClient(cfg.NATS.URL)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	jsConsumer := natsinfra.NewJetStreamConsumer(natsClient.Js)
+
+	//--------------------------------
+	// Coupon Event Consumer
+	//--------------------------------
+
+	couponConsumer := natsadapter.New(couponEventHandler)
+
+	jsConsumer.Subscribe(
+		ctx,
+		cfg.NATS.Subject,
+		"user-coupon-consumer",
+		couponConsumer.Handle,
+	)
+
+	//--------------------------------
+	// Order Completed Consumer
+	//--------------------------------
+
+	orderCompletedConsumer := ordercompletedconsumer.NewOrderCompletedConsumer(
+		orderCompletedHandler,
+	)
+
+	jsConsumer.Subscribe(
+		ctx,
+		"order.completed",
+		"user-coupon-order-completed",
+		orderCompletedConsumer.Handle,
+	)
+
+	//--------------------------------
+	// Order Failed Consumer 🔥 (เพิ่มใหม่)
+	//--------------------------------
+
+	orderFailedConsumer := orderfailedconsumer.NewOrderFailedConsumer(
+		orderFailedHandler,
+	)
+
+	jsConsumer.Subscribe(
+		ctx,
+		"order.failed",
+		"user-coupon-order-failed",
+		orderFailedConsumer.Handle,
+	)
+
+	//--------------------------------
+	// Worker (Expire Coupon)
+	//--------------------------------
+
+	expiryWorker := worker.New(commandSvc)
+
+	expiryWorker.Start()
+
+	//--------------------------------
+	// Graceful Shutdown
+	//--------------------------------
+
+	stop := make(chan os.Signal, 1)
+
+	signal.Notify(
+		stop,
+		os.Interrupt,
+		syscall.SIGTERM,
+	)
+
+	<-stop
+
+	log.Println("shutting down...")
+
+	expiryWorker.Stop()
+
+	grpcServer.Stop(ctx)
+	httpServer.Stop(ctx)
+
+	natsClient.Close()
+}

@@ -1,0 +1,107 @@
+syntax = "proto3";
+
+package usercoupon;
+
+option go_package = "dift_user_insentive/user-coupon-service/proto/pb/usercoupon;usercoupon";
+
+service UserCouponService {
+
+  // -------------------------
+  // READ
+  // -------------------------
+  rpc GetUserCoupons (GetUserCouponsRequest)
+      returns (GetUserCouponsResponse);
+
+  rpc ValidateCoupon (ValidateCouponRequest)
+      returns (ValidateCouponResponse);
+
+  // -------------------------
+  // WRITE
+  // -------------------------
+  rpc ReserveCoupon (ReserveCouponRequest)
+      returns (ReserveCouponResponse);
+
+  // 🔥 (แนะนำเพิ่ม) เผื่อใช้ในอนาคต / manual release
+  rpc ReleaseCoupon (ReleaseCouponRequest)
+      returns (ReleaseCouponResponse);
+}
+
+// -------------------------
+// REQUEST / RESPONSE
+// -------------------------
+
+message GetUserCouponsRequest {
+  string user_id = 1;
+}
+
+message GetUserCouponsResponse {
+  repeated UserCoupon coupons = 1;
+}
+
+message ValidateCouponRequest {
+  string user_id = 1;
+  string coupon_code = 2;
+}
+
+message ValidateCouponResponse {
+  bool valid = 1;
+  string error_message = 2;
+  UserCoupon coupon = 3;
+}
+
+// -------------------------
+// 🔥 RESERVE
+// -------------------------
+
+message ReserveCouponRequest {
+  string user_id = 1;
+  string coupon_code = 2;
+}
+
+message ReserveCouponResponse {
+  bool success = 1;
+  string error_message = 2;
+}
+
+// -------------------------
+// 🔥 RELEASE (optional but recommended)
+// -------------------------
+
+message ReleaseCouponRequest {
+  string user_id = 1;
+  string coupon_code = 2;
+}
+
+message ReleaseCouponResponse {
+  bool success = 1;
+  string error_message = 2;
+}
+
+// -------------------------
+// MODEL
+// -------------------------
+
+message UserCoupon {
+
+  string user_id = 1;
+  string coupon_code = 2;
+  string status = 3;
+
+  // discount
+  string discount_type = 4;
+  double discount_value = 5;
+
+  double min_order = 6;
+  double max_discount = 7;
+
+  // targeting
+  string product_type = 8;
+
+  // usage
+  int32 max_usage = 9;
+  int32 usage_count = 10;
+
+  // validity
+  string valid_from = 11;
+  string valid_to = 12;
+}

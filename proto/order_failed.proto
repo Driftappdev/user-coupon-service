@@ -1,0 +1,12 @@
+syntax = "proto3";
+
+package pb;
+
+option go_package = "dift_user_insentive/user-coupon-service/proto/pb;pb";
+
+message OrderFailedEvent {
+  string user_id = 1;
+  string coupon_code = 2;
+  string order_id = 3;
+  int64 failed_at = 4;
+}

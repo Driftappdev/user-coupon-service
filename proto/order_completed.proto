@@ -1,0 +1,18 @@
+syntax = "proto3";
+
+package coupon.event;
+
+option go_package = "dift_user_insentive/user-coupon-service/proto/pb;pb";
+
+message OrderCompletedEvent {
+
+  string order_id = 1;
+
+  string user_id = 2;
+
+  string coupon_code = 3;
+
+  double discount_amount = 4;
+
+  int64 completed_at = 5;
+}
