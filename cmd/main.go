@@ -9,17 +9,21 @@ import (
 	"syscall"
 
 	"dift_user_insentive/user-coupon-service/config"
+	"dift_user_insentive/user-coupon-service/internal/admincontrol"
 
 	grpcadapter "dift_user_insentive/user-coupon-service/internal/adapter/grpc"
 	httpadapter "dift_user_insentive/user-coupon-service/internal/adapter/http"
+	natsadmin "dift_user_insentive/user-coupon-service/internal/adapter/nats_admin"
 	ordercompletedconsumer "dift_user_insentive/user-coupon-service/internal/adapter/order_completed_consumer"
 	orderfailedconsumer "dift_user_insentive/user-coupon-service/internal/adapter/order_failed_consumer"
 	repositoryadapter "dift_user_insentive/user-coupon-service/internal/adapter/repository"
 	natsadapter "dift_user_insentive/user-coupon-service/internal/adapter/user_coupon_comsumer"
 	worker "dift_user_insentive/user-coupon-service/internal/adapter/worker"
 
+	adminhandler "dift_user_insentive/user-coupon-service/internal/service_logic/handler/admin"
 	couponhandler "dift_user_insentive/user-coupon-service/internal/service_logic/handler/coupon_event"
 	orderhandler "dift_user_insentive/user-coupon-service/internal/service_logic/handler/order"
+	adminservice "dift_user_insentive/user-coupon-service/internal/service_logic/service/admin"
 	assignservice "dift_user_insentive/user-coupon-service/internal/service_logic/service/coupon_event"
 	usageservice "dift_user_insentive/user-coupon-service/internal/service_logic/service/order_complete"
 	releaseservice "dift_user_insentive/user-coupon-service/internal/service_logic/service/order_failed"
@@ -41,6 +45,7 @@ import (
 )
 
 func main() {
+	_ = servicecore.NewEngineUnifiedBundle(servicecore.LoadEngineUnifiedConfigFromEnv("user-coupon-service"))
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -128,6 +133,7 @@ func main() {
 			cfg.NATS.Subject,
 			"order.completed",
 			"order.failed",
+			"admin.control.user-coupon-service.command",
 		},
 	); err != nil {
 		log.Fatal(err)
@@ -166,6 +172,19 @@ func main() {
 		"order.failed",
 		"user-coupon-order-failed",
 		orderFailedConsumer.Handle,
+	); err != nil {
+		log.Fatal(err)
+	}
+
+	adminCfg := admincontrol.LoadConfig("admin.control.user-coupon-service.command", "user-coupon-admin-control")
+	commandService := adminservice.NewCommandService(assignSvc, reserveSvc, releaseSvc, expireSvc)
+	commandHandler := adminhandler.NewCommandHandler(commandService)
+	adminConsumer := natsadmin.NewCommandConsumer(commandHandler)
+	if err := jsConsumer.Subscribe(
+		ctx,
+		adminCfg.Subject,
+		adminCfg.Durable,
+		adminConsumer.Handle,
 	); err != nil {
 		log.Fatal(err)
 	}

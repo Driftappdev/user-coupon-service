@@ -1,25 +1,22 @@
-﻿package middleware
+package middleware
 
 import (
+	"log"
 	"time"
-
-	"dift_user_insentive/user-coupon-service/pkg/wrapper"
 
 	"github.com/gin-gonic/gin"
 )
 
 func Audit() gin.HandlerFunc {
-	logger := wrapper.NewJSONLogger(wrapper.LevelInfo)
 	return func(c *gin.Context) {
 		start := time.Now()
 		c.Next()
-		logger.Info("audit_log",
-			wrapper.LogField("request_id", c.GetString("request_id")),
-			wrapper.LogField("method", c.Request.Method),
-			wrapper.LogField("path", c.FullPath()),
-			wrapper.LogField("status", c.Writer.Status()),
-			wrapper.LogField("latency_ms", time.Since(start).Milliseconds()),
+		log.Printf("audit_log request_id=%s method=%s path=%s status=%d latency_ms=%d",
+			c.GetString("request_id"),
+			c.Request.Method,
+			c.FullPath(),
+			c.Writer.Status(),
+			time.Since(start).Milliseconds(),
 		)
 	}
 }
-
